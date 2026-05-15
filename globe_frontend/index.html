@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GeoSentiment Globe</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: radial-gradient(ellipse at center, #0a0a1a 0%, #000005 100%);
+      overflow: hidden;
+      font-family: 'Inter', sans-serif;
+    }
+
+    #globeViz {
+      width: 100vw;
+      height: 580px;
+      display: block;
+    }
+
+    #overlay {
+      position: fixed;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 255, 200, 0.08);
+      border: 1px solid rgba(0, 255, 200, 0.25);
+      backdrop-filter: blur(8px);
+      color: rgba(0, 255, 200, 0.9);
+      padding: 7px 18px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      pointer-events: none;
+      white-space: nowrap;
+      z-index: 10;
+      text-transform: uppercase;
+    }
+
+    #loading {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000010;
+      z-index: 100;
+      transition: opacity 0.6s ease;
+    }
+
+    #loading.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .loader-ring {
+      width: 52px;
+      height: 52px;
+      border: 3px solid rgba(0,255,200,0.15);
+      border-top-color: rgba(0,255,200,0.85);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Legend */
+    #legend {
+      position: fixed;
+      bottom: 14px;
+      left: 14px;
+      background: rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 8px 12px;
+      z-index: 10;
+      font-size: 11px;
+      color: #aaa;
+    }
+    #legend div { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+
+  <div id="loading"><div class="loader-ring"></div></div>
+  <div id="overlay">🌍 Click a region to filter news</div>
+  <div id="globeViz"></div>
+  <div id="legend">
+    <div><span class="dot" style="background:#00e676"></span> Positive</div>
+    <div><span class="dot" style="background:#ffeb3b"></span> Neutral</div>
+    <div><span class="dot" style="background:#ff5252"></span> Negative</div>
+  </div>
+
+  <script src="https://unpkg.com/three@0.136.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/globe.gl@2.28.1/dist/globe.gl.min.js"></script>
+
+  <script>
+    // ─────────────────────────────────────────────
+    //  Streamlit Component Communication Protocol
+    // ─────────────────────────────────────────────
+
+    const FRAME_HEIGHT = 580;
+
+    function sendToStreamlit(type, payload) {
+      const msg = Object.assign({ isStreamlitMessage: true, type: type }, payload);
+      window.parent.postMessage(msg, "*");
+    }
+
+    function notifyReady() {
+      sendToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+    }
+
+    function setFrameHeight(height) {
+      sendToStreamlit("streamlit:setFrameHeight", { height: height });
+    }
+
+    function setComponentValue(value) {
+      sendToStreamlit("streamlit:setComponentValue", { value: value });
+    }
+
+    // ─────────────────────────────────────────────
+    //  Sentiment → Color mapping
+    // ─────────────────────────────────────────────
+
+    /**
+     * Map a sentiment score [-1, +1] to an RGB hex color.
+     * Positive  → Green (#00e676)
+     * Neutral   → Yellow (#ffeb3b)
+     * Negative  → Red (#ff5252)
+     * No data   → Cyan (default)
+     */
+    function sentimentColor(score) {
+      if (score === null || score === undefined) return "#00ffc8"; // default cyan
+      if (score >= 0.15)  return "#00e676"; // green
+      if (score <= -0.15) return "#ff5252"; // red
+      return "#ffeb3b";                     // yellow (neutral)
+    }
+
+    // ─────────────────────────────────────────────
+    //  Globe Data (base regions)
+    // ─────────────────────────────────────────────
+
+    const BASE_REGIONS = [
+      { name: "Global",        lat:   0, lng:   0   },
+      { name: "Asia",          lat:  34, lng: 100   },
+      { name: "Europe",        lat:  52, lng:  12   },
+      { name: "North America", lat:  40, lng: -100  },
+      { name: "South America", lat: -15, lng:  -60  },
+      { name: "Africa",        lat:   5, lng:  20   },
+      { name: "Middle East",   lat:  25, lng:  45   },
+      { name: "Oceania",       lat: -25, lng: 135   },
+    ];
+
+    // Current sentiment state (updated on each render)
+    let currentSentiments = {};
+
+    function buildPoints(sentiments) {
+      return BASE_REGIONS.map(r => ({
+        ...r,
+        score: (sentiments && sentiments[r.name] !== undefined)
+          ? sentiments[r.name]
+          : null,
+        color: sentimentColor(
+          (sentiments && sentiments[r.name] !== undefined)
+            ? sentiments[r.name]
+            : null
+        ),
+        size: r.name === "Global" ? 0.7 : 0.6,
+      }));
+    }
+
+    // ─────────────────────────────────────────────
+    //  Globe Initialization
+    // ─────────────────────────────────────────────
+
+    let globeInstance = null;
+    let initialized   = false;
+
+    function initGlobe(args) {
+      if (initialized) return;
+      initialized = true;
+
+      // Extract initial sentiment data from args
+      if (args && args.region_sentiments) {
+        currentSentiments = args.region_sentiments;
+      }
+
+      const el = document.getElementById("globeViz");
+      const points = buildPoints(currentSentiments);
+
+      const globe = Globe()
+        .globeImageUrl("https://unpkg.com/three-globe/example/img/earth-dark.jpg")
+        .backgroundImageUrl("https://unpkg.com/three-globe/example/img/night-sky.png")
+        .width(el.clientWidth  || window.innerWidth)
+        .height(FRAME_HEIGHT)
+        .pointsData(points)
+        .pointColor(d => d.color)
+        .pointAltitude(0.07)
+        .pointRadius(d => d.size)
+        .pointResolution(16)
+        .pointLabel(d => {
+          const scoreStr = d.score !== null
+            ? `<span style="font-size:11px; opacity:0.8;">${d.score >= 0 ? '+' : ''}${d.score.toFixed(2)}</span>`
+            : `<span style="font-size:10px; opacity:0.5;">no data</span>`;
+          return `<div style="
+            background: rgba(0,0,0,0.85);
+            color: ${d.color};
+            padding: 5px 14px;
+            border-radius: 8px;
+            font-family: Inter, sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            border: 1px solid ${d.color}55;
+            box-shadow: 0 0 12px ${d.color}44;
+            letter-spacing: 0.03em;
+          ">${d.name} &nbsp; ${scoreStr}</div>`;
+        })
+        .onPointClick(point => {
+          setComponentValue(point.name);
+        })
+        (el);
+
+      globeInstance = globe;
+
+      // ── Lighting ──
+      const ambient = new THREE.AmbientLight(0x888888, 1.0);
+      globe.scene().add(ambient);
+
+      const sun = new THREE.DirectionalLight(0xfff4e0, 1.2);
+      sun.position.set(5, 3, 5);
+      globe.scene().add(sun);
+
+      const fill = new THREE.DirectionalLight(0x4488ff, 0.3);
+      fill.position.set(-5, -3, -2);
+      globe.scene().add(fill);
+
+      // ── Auto-rotate ──
+      globe.controls().autoRotate      = true;
+      globe.controls().autoRotateSpeed = 0.65;
+      globe.controls().enableDamping   = true;
+      globe.controls().dampingFactor   = 0.1;
+      globe.controls().minDistance     = 101;
+      globe.controls().maxDistance     = 600;
+
+      // ── Initial camera position ──
+      globe.pointOfView({ lat: 20, lng: 10, altitude: 2.4 }, 0);
+
+      // Hide loader
+      const loader = document.getElementById("loading");
+      if (loader) loader.classList.add("hidden");
+
+      setFrameHeight(FRAME_HEIGHT);
+    }
+
+    function updateGlobeColors(sentiments) {
+      if (!globeInstance) return;
+      const points = buildPoints(sentiments);
+      globeInstance.pointsData(points);
+    }
+
+    // ─────────────────────────────────────────────
+    //  CRITICAL: Listen for streamlit:render
+    //  Globe MUST NOT initialize before this fires
+    // ─────────────────────────────────────────────
+
+    window.addEventListener("message", function (event) {
+      const data = event.data;
+      if (!data || typeof data !== "object") return;
+
+      if (data.type === "streamlit:render") {
+        const args = data.args || {};
+
+        if (!initialized) {
+          initGlobe(args);
+        } else {
+          // Already initialized — just update point colors if sentiments changed
+          if (args.region_sentiments) {
+            currentSentiments = args.region_sentiments;
+            updateGlobeColors(currentSentiments);
+          }
+        }
+      }
+    });
+
+    // ─────────────────────────────────────────────
+    //  Signal Streamlit we are ready (after load)
+    // ─────────────────────────────────────────────
+
+    window.addEventListener("load", function () {
+      notifyReady();
+    });
+  </script>
+</body>
+</html>
