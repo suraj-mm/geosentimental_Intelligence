@@ -147,14 +147,20 @@
     // ─────────────────────────────────────────────
 
     const BASE_REGIONS = [
-      { name: "Global",        lat:   0, lng:   0   },
-      { name: "Asia",          lat:  34, lng: 100   },
-      { name: "Europe",        lat:  52, lng:  12   },
-      { name: "North America", lat:  40, lng: -100  },
-      { name: "South America", lat: -15, lng:  -60  },
-      { name: "Africa",        lat:   5, lng:  20   },
-      { name: "Middle East",   lat:  25, lng:  45   },
-      { name: "Oceania",       lat: -25, lng: 135   },
+      { name: "Global",        lat:   0, lng:   0,   type: "region" },
+      { name: "Asia",          lat:  34, lng: 100,   type: "region" },
+      { name: "Europe",        lat:  52, lng:  12,   type: "region" },
+      { name: "North America", lat:  40, lng: -100,  type: "region" },
+      { name: "South America", lat: -15, lng:  -60,  type: "region" },
+      { name: "Africa",        lat:   5, lng:  20,   type: "region" },
+      { name: "Middle East",   lat:  25, lng:  45,   type: "region" },
+      { name: "Oceania",       lat: -25, lng: 135,   type: "region" },
+      { name: "India",         lat:  20, lng:  78,   type: "country" },
+      { name: "America",       lat:  38, lng: -95,   type: "country" },
+      { name: "England",       lat:  51, lng:  -2,   type: "country" },
+      { name: "Japan",         lat:  35, lng: 139,   type: "country" },
+      { name: "China",         lat:  35, lng: 105,   type: "country" },
+      { name: "Iran",          lat:  32, lng:  54,   type: "country" },
     ];
 
     // Current sentiment state (updated on each render)
@@ -171,7 +177,7 @@
             ? sentiments[r.name]
             : null
         ),
-        size: r.name === "Global" ? 0.7 : 0.6,
+        size: r.name === "Global" ? 0.7 : r.type === "country" ? 0.75 : 0.6,
       }));
     }
 

@@ -224,6 +224,56 @@ SECTOR_STOCKS = {
     ],
 }
 
+# Country-Specific Stock Lists
+COUNTRY_STOCKS = {
+    "India": [
+        {"ticker": "RELIANCE.NS", "name": "Reliance Industries", "country": "India", "exchange": "NSE"},
+        {"ticker": "TCS.NS", "name": "Tata Consultancy Services", "country": "India", "exchange": "NSE"},
+        {"ticker": "INFY.NS", "name": "Infosys Limited", "country": "India", "exchange": "NSE"},
+        {"ticker": "HDFCBANK.NS", "name": "HDFC Bank Limited", "country": "India", "exchange": "NSE"},
+        {"ticker": "ICICIBANK.NS", "name": "ICICI Bank Limited", "country": "India", "exchange": "NSE"},
+        {"ticker": "LT.NS", "name": "Larsen & Toubro", "country": "India", "exchange": "NSE"},
+    ],
+    "America": [
+        {"ticker": "AAPL", "name": "Apple Inc.", "country": "USA", "exchange": "NASDAQ"},
+        {"ticker": "MSFT", "name": "Microsoft Corp.", "country": "USA", "exchange": "NASDAQ"},
+        {"ticker": "GOOGL", "name": "Alphabet Inc.", "country": "USA", "exchange": "NASDAQ"},
+        {"ticker": "NVDA", "name": "NVIDIA Corp.", "country": "USA", "exchange": "NASDAQ"},
+        {"ticker": "JPM", "name": "JPMorgan Chase", "country": "USA", "exchange": "NYSE"},
+        {"ticker": "TSLA", "name": "Tesla Inc.", "country": "USA", "exchange": "NASDAQ"},
+    ],
+    "England": [
+        {"ticker": "HSBA.L", "name": "HSBC Holdings", "country": "UK", "exchange": "LSE"},
+        {"ticker": "LLOY.L", "name": "Lloyds Banking Group", "country": "UK", "exchange": "LSE"},
+        {"ticker": "BP.L", "name": "BP plc", "country": "UK", "exchange": "LSE"},
+        {"ticker": "SHELL.L", "name": "Shell plc", "country": "UK", "exchange": "LSE"},
+        {"ticker": "GLEN.L", "name": "Glencore plc", "country": "UK", "exchange": "LSE"},
+        {"ticker": "DGE.L", "name": "Diageo plc", "country": "UK", "exchange": "LSE"},
+    ],
+    "Japan": [
+        {"ticker": "9984.T", "name": "SoftBank Group Corp.", "country": "Japan", "exchange": "TSE"},
+        {"ticker": "6758.T", "name": "Sony Group Corporation", "country": "Japan", "exchange": "TSE"},
+        {"ticker": "7203.T", "name": "Toyota Motor Corp.", "country": "Japan", "exchange": "TSE"},
+        {"ticker": "8035.T", "name": "Tokyo Electron Limited", "country": "Japan", "exchange": "TSE"},
+        {"ticker": "9432.T", "name": "Nippon Telegraph & Telephone", "country": "Japan", "exchange": "TSE"},
+        {"ticker": "8306.T", "name": "Mitsubishi UFJ Financial", "country": "Japan", "exchange": "TSE"},
+    ],
+    "China": [
+        {"ticker": "BABA", "name": "Alibaba Group Holding", "country": "China", "exchange": "NYSE"},
+        {"ticker": "PDD", "name": "PinDuoDuo Inc.", "country": "China", "exchange": "NASDAQ"},
+        {"ticker": "NTES", "name": "NetEase Inc.", "country": "China", "exchange": "NASDAQ"},
+        {"ticker": "JD", "name": "JD.com Inc.", "country": "China", "exchange": "NASDAQ"},
+        {"ticker": "TCEHY", "name": "Tencent Holdings", "country": "China", "exchange": "OTC"},
+        {"ticker": "NIO", "name": "NIO Inc.", "country": "China", "exchange": "NYSE"},
+    ],
+    "Iran": [
+        {"ticker": "SAPCO.IR", "name": "Saipa Co. Ltd.", "country": "Iran", "exchange": "Tehran"},
+        {"ticker": "KCHOL.IR", "name": "Khodro Company", "country": "Iran", "exchange": "Tehran"},
+        {"ticker": "IMMC.IR", "name": "Iran Minerals Company", "country": "Iran", "exchange": "Tehran"},
+        {"ticker": "NIOPDC.IR", "name": "National Iranian Oil Products", "country": "Iran", "exchange": "Tehran"},
+    ],
+}
+
 
 def get_sectors_for_topic(topic: str) -> list:
     """
@@ -267,6 +317,15 @@ def get_stock_candidates(topic: str, max_stocks: int = 6) -> list:
             break
 
     return candidates[:max_stocks]
+
+
+def get_country_stocks(country: str, max_stocks: int = 6) -> list:
+    """
+    Get country-specific stock candidates.
+    Returns list of stock dicts for the given country.
+    """
+    stocks = COUNTRY_STOCKS.get(country, [])
+    return stocks[:max_stocks]
 
 
 @st.cache_data(ttl=120)  # 2-min cache for stock prices
@@ -381,6 +440,43 @@ def get_stock_suggestions(
             "ticker": ticker,
             "name": stock["name"],
             "sector": stock["sector"],
+            "price": market_data["price"],
+            "change_pct": market_data["change_pct"],
+            "price_trend_5d": price_trend,
+            "confidence": confidence,
+            "error": market_data["error"],
+        })
+
+    return results
+
+
+def get_country_stock_suggestions(
+    country: str,
+    sentiment_score: float,
+    news_count: int,
+    max_stocks: int = 6,
+) -> list:
+    """
+    Get country-specific stock suggestions with live data.
+    
+    Each dict:
+      ticker, name, country, exchange, price, change_pct, confidence, error
+    """
+    candidates = get_country_stocks(country, max_stocks=max_stocks)
+    results = []
+
+    for stock in candidates:
+        ticker = stock["ticker"]
+        market_data = fetch_stock_data(ticker)
+
+        price_trend = market_data.get("price_trend", 0.0)
+        confidence = compute_confidence(sentiment_score, news_count, price_trend)
+
+        results.append({
+            "ticker": ticker,
+            "name": stock["name"],
+            "country": stock.get("country", country),
+            "exchange": stock.get("exchange", ""),
             "price": market_data["price"],
             "change_pct": market_data["change_pct"],
             "price_trend_5d": price_trend,

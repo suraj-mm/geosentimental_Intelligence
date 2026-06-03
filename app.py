@@ -7,7 +7,7 @@ import streamlit as st
 from globe_component import render_globe
 from news_fetcher import fetch_news_by_topic, fetch_news_by_region, TOPIC_QUERIES
 from sentiment import analyze_articles, aggregate_by_region, compute_divergence
-from stock_engine import get_stock_suggestions
+from stock_engine import get_stock_suggestions, get_country_stock_suggestions
 
 # ── Page Configuration ─────────────────────────────────────────────────────────
 st.set_page_config(
@@ -435,9 +435,12 @@ with col_right:
             unsafe_allow_html=True,
         )
 
+        # Separate regions and countries
         ORDERED_REGIONS = ["North America", "Europe", "Asia", "Middle East",
                            "South America", "Africa", "Oceania"]
+        ORDERED_COUNTRIES = ["India", "America", "England", "Japan", "China", "Iran"]
 
+        # Display Regions first
         for region in ORDERED_REGIONS:
             score = region_sentiments.get(region)
             if score is None:
@@ -455,7 +458,7 @@ with col_right:
 
             st.markdown(f"""
             <div class="region-row">
-              <span class="region-name">{region}</span>
+              <span class="region-name" style="color:#c0c0e0;">{region}</span>
               <div class="sentiment-bar-bg">
                 <div class="sentiment-bar-fill"
                      style="background:{bar_color}; width:{bar_width}; margin-left:{bar_left};"></div>
@@ -465,6 +468,59 @@ with col_right:
               </span>
             </div>
             """, unsafe_allow_html=True)
+
+        # Display Countries
+        st.markdown(
+            "<p style='font-size:11px; color:#7070a0; text-transform:uppercase;"
+            " letter-spacing:0.07em; margin-top:10px; margin-bottom:6px;'>🌍 Country Sentiment (Tap to View)</p>",
+            unsafe_allow_html=True,
+        )
+
+        for country in ORDERED_COUNTRIES:
+            score = region_sentiments.get(country)
+            
+            col_display, col_btn = st.columns([0.9, 0.1])
+            
+            with col_display:
+                if score is None:
+                    # Show country even without data
+                    st.markdown(f"""
+                    <div class="region-row">
+                      <span class="region-name" style="color:#00ffc8; font-weight:600;">{country}</span>
+                      <div class="sentiment-bar-bg">
+                        <div class="sentiment-bar-fill" style="background:#4a4a6a; width:50%;"></div>
+                      </div>
+                      <span class="sentiment-value" style="color:#6060a0">—</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    pct = int((score + 1) / 2 * 100)
+                    bar_color = "#00e676" if score >= 0.15 else "#ff5252" if score <= -0.15 else "#ffeb3b"
+
+                    if score >= 0:
+                        bar_left  = "50%"
+                        bar_width = f"{pct - 50}%"
+                    else:
+                        bar_left  = f"{pct}%"
+                        bar_width = f"{50 - pct}%"
+
+                    st.markdown(f"""
+                    <div class="region-row">
+                      <span class="region-name" style="color:#00ffc8; font-weight:600;">{country}</span>
+                      <div class="sentiment-bar-bg">
+                        <div class="sentiment-bar-fill"
+                             style="background:{bar_color}; width:{bar_width}; margin-left:{bar_left};"></div>
+                      </div>
+                      <span class="sentiment-value" style="color:{bar_color}">
+                        {'+' if score >= 0 else ''}{score:.2f}
+                      </span>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            with col_btn:
+                if st.button("👉", key=f"country_{country}_btn", help=f"View {country} news & stocks"):
+                    st.session_state.selected_region = country
+                    st.rerun()
 
         st.markdown("<div style='margin-bottom:14px'></div>", unsafe_allow_html=True)
 
@@ -541,6 +597,80 @@ with col_right:
             st.warning(f"No articles found for {selected_region}. Try clicking another region.")
         else:
             st.info("Select a topic above to load global news and sentiment.")
+
+    # ── Country-Specific Stocks ────────────────────────────────────────────────
+    COUNTRIES = ["India", "America", "England", "Japan", "China", "Iran"]
+    if selected_region and selected_region in COUNTRIES:
+        st.markdown("---")
+        st.markdown(f"### 📈 {selected_region} Stock Picks")
+        st.markdown(
+            "<p style='color:#6060a0; font-size:12px; margin-top:-8px;'>"
+            f"Top stocks affected by {active_topic} sentiment in {selected_region}</p>",
+            unsafe_allow_html=True,
+        )
+
+        # Get country-specific sentiment for confidence
+        country_sentiment = region_sentiments.get(selected_region, 0.0)
+        news_count = len(all_articles)
+
+        with st.spinner(f"Fetching {selected_region} market data…"):
+            country_stocks = get_country_stock_suggestions(
+                country=selected_region,
+                sentiment_score=country_sentiment,
+                news_count=news_count,
+                max_stocks=6,
+            )
+
+        if country_stocks:
+            for stock in country_stocks:
+                price = stock.get("price")
+                change = stock.get("change_pct", 0.0)
+                confidence = stock.get("confidence", 50.0)
+                error = stock.get("error")
+                exchange = stock.get("exchange", "")
+
+                price_str = f"${price:,.2f}" if price else "—"
+                if change > 0:
+                    change_str = f"▲ {change:+.2f}%"
+                    change_class = "stock-change-pos"
+                elif change < 0:
+                    change_str = f"▼ {change:.2f}%"
+                    change_class = "stock-change-neg"
+                else:
+                    change_str = f"◆ {change:.2f}%"
+                    change_class = "stock-change-neu"
+
+                conf_color = (
+                    "#00e676" if confidence >= 70 else
+                    "#ffeb3b" if confidence >= 50 else
+                    "#ff5252"
+                )
+
+                st.markdown(f"""
+                <div class="stock-card">
+                  <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <div>
+                      <div class="stock-ticker">{stock['ticker']}</div>
+                      <div class="stock-name">{stock['name']}</div>
+                      <div style="font-size:10px; color:#5050a0; margin-top:2px;">{exchange}</div>
+                    </div>
+                    <div style="text-align:right;">
+                      <div class="stock-price">{price_str}</div>
+                      <div class="{change_class}">{change_str}</div>
+                    </div>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+                    <span style="font-size:10px; color:#6060a0;">Confidence</span>
+                    <span style="font-size:11px; font-weight:700; color:{conf_color};">{confidence:.0f}%</span>
+                  </div>
+                  <div class="confidence-bar-bg">
+                    <div class="confidence-bar-fill" style="width:{confidence}%;"></div>
+                  </div>
+                  {"<div style='font-size:9px; color:#504060; margin-top:4px;'>⚠ Price unavailable (market closed or API limit)</div>" if error else ""}
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info(f"No stock data available for {selected_region}.")
 
     st.markdown(
         "<p style='color:#3a3a5a; font-size:11px; margin-top:8px;'>"
