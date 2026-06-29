@@ -1,7 +1,5 @@
 GeoSentiment Cascade – AI-Powered Geopolitical Stock Market Prediction              
-‣ Role: Data Engineer / Data Preprocessing Engineer 
-‣  
-repository-link
+
 ‣ • Developed an AI-powered stock market prediction framework that analyzes multilingual 
 geopolitical news using XLM-RoBERTa, FinBERT, and Jensen-Shannon Divergence (JSD) 
 to identify regional narrative differences and predict market movements. 
